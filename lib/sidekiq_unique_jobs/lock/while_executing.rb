@@ -1,3 +1,5 @@
+require "redis-classy"
+require "redis-mutex"
 module SidekiqUniqueJobs
   module Lock
     class WhileExecuting
@@ -14,21 +16,37 @@ module SidekiqUniqueJobs
 
       def synchronize
         @mutex.lock
-        sleep 0.1 until locked?
+        RedisClassy.redis = SidekiqUniqueJobs.connection(@redis_pool) {|redis| redis}
+        mutex = RedisMutex.new(@unique_digest, block: 0, expire: max_lock_time)
 
-        yield
+        if mutex.lock
+          begin
+            yield
+          ensure
+            mutex.unlock
+          end
+        else
+          SidekiqUniqueJobs.connection(@redis_pool) do |c|
+            @item["class"].constantize.perform_at(2.minute, *@item["unique_args"])
+          end
+        end
       rescue Sidekiq::Shutdown
         logger.fatal { "the unique_key: #{@unique_digest} needs to be unlocked manually" }
         raise
       ensure
-        SidekiqUniqueJobs.connection(@redis_pool) { |c| c.del @unique_digest }
         @mutex.unlock
       end
 
-      def locked?
-        Scripts.call(:synchronize, @redis_pool,
-                     keys: [@unique_digest],
-                     argv: [Time.now.to_i, max_lock_time]) == 1
+      def get_lock?
+        begin
+          SidekiqUniqueJobs.connection(@redis_pool) do |redis|
+            res = redis.client.call([:set,@unique_digest,Time.now.to_i + max_lock_time,:nx,:px,max_lock_time])
+          end
+          true
+        rescue => e
+          puts e
+          return false
+        end
       end
 
       def max_lock_time

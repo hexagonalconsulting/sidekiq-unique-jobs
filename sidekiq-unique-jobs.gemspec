@@ -17,6 +17,8 @@ Gem::Specification.new do |gem|
   gem.version = SidekiqUniqueJobs::VERSION
   gem.add_dependency 'sidekiq', '>= 2.6'
   gem.add_dependency 'thor', '>= 0'
+  gem.add_dependency 'redis-mutex'
+  gem.add_dependency 'redis-classy'
   gem.add_development_dependency 'rspec', '~> 3.1'
   gem.add_development_dependency 'rake'
   gem.add_development_dependency 'timecop'
